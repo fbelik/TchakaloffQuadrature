@@ -1,0 +1,11 @@
+[deps]
+CaratheodoryPruning = "ab320bfc-8242-4797-bfc4-9370c33880e7"
+ClassicalOrthogonalPolynomials = "b30e2e7b-c4ee-47da-9d5f-2c5c27239acd"
+Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
+FastGaussQuadrature = "442a2c76-b920-505d-bb47-c5924d526838"
+KernelDensity = "5ab0869b-81aa-558d-bb23-cbf5423bbe9b"
+Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+PolyChaos = "8d666b04-775d-5f6e-b778-5ac7c70f65a3"
+ProgressBars = "49802e3a-d2f1-5c88-81d8-b72133a6f568"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+StatsPlots = "f3b207a7-027a-5e70-b257-86293d7955fd"
