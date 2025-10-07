@@ -19,7 +19,6 @@ d = MultivariateInducedDistribution((:hermite,:laguerre), N, index_set=multi_ind
 
 q = least_squares_quad(d, M);
 q0 = least_squares_quad(d, M, induced=false);
-X = reduce(hcat, q.nodes)
 plot(q, zcolor=q.weights .>= 0)
 plot(q0, zcolor=q0.weights .>= 0)
 
@@ -29,29 +28,22 @@ plot!(q0)
 succ, plt = trial_comparison(d, M, trials, tol=1e-4); plt
 
 # Continuous insertion/removal
-M0 = 50; tol=1e-4;
+tol=1e-6;
 d = InducedDistribution(:hermite,15);
 d = MultivariateInducedDistribution((:legendre,:hermite),6);
 
-plt1, plt2, ws, cs, Ms = continuous_insertion_trials(d, M0=M0, tol=tol);
-plt3, plt4, w0s, c0s, M0s = continuous_insertion_trials(d, induced=false, M0=M0, MMax=10M0,tol=tol);
-plt5, plt6, wrs, crs, Mrs = continuous_removal_trials(d, M0=M0, tol=tol);
-plt7, plt8, w0rs, c0rs, M0rs = continuous_removal_trials(d, induced=false, M0=M0, MMax=10M0, tol=tol);
+plt1, plt2, ws, cs, Ms = continuous_insertion_trials(d, tol=tol, MMax=1000);
+plt3, plt4, w0s, c0s, M0s = continuous_insertion_trials(d, induced=false, MMax=1000,tol=tol);
+plt5, plt6, wrs, crs, Mrs = continuous_removal_trials(d, tol=tol, MMax=1000);
+plt7, plt8, w0rs, c0rs, M0rs = continuous_removal_trials(d, induced=false, MMax=1000, tol=tol);
 
-median(length.(Ms))
-mean(length.(Ms))
-std(length.(Ms))
-median(length.(M0s))
-mean(length.(M0s))
-std(length.(M0s))
-
-maxxlim = 200#min(maximum(length.(Ms)), maximum(length.(M0s)))
+maxxlim = 1000
 
 plot(
     plot!(plt1,title="Induced minimum weight",xlims=(Ms[1][1],maxxlim)),
     plot!(plt2,title="Induced concentration",xlims=(Ms[1][1],maxxlim)),
-    plot!(plt3,title="Original minimum weight",xlims=(Ms[1][1],maxxlim)),
-    plot!(plt4,title="Original concentration",xlims=(Ms[1][1],maxxlim)),
+    plot!(plt3,title="Standard minimum weight",xlims=(Ms[1][1],maxxlim)),
+    plot!(plt4,title="Standard concentration",xlims=(Ms[1][1],maxxlim)),
     layout=(2,2),
     size=(600,600),
     plot_title="Continuous Insertion"
@@ -60,8 +52,8 @@ plot(
 plot(
     plot!(plt5,title="Induced minimum weight",xlims=(Ms[1][1],maxxlim)),
     plot!(plt6,title="Induced concentration",xlims=(Ms[1][1],maxxlim)),
-    plot!(plt7,title="Original minimum weight",xlims=(Ms[1][1],maxxlim)),
-    plot!(plt8,title="Original concentration",xlims=(Ms[1][1],maxxlim)),
+    plot!(plt7,title="Standard minimum weight",xlims=(Ms[1][1],maxxlim)),
+    plot!(plt8,title="Standard concentration",xlims=(Ms[1][1],maxxlim)),
     layout=(2,2),
     size=(600,600),
     plot_title="Continuous Removal"

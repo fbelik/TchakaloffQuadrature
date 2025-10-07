@@ -2,7 +2,7 @@ mutable struct LS_Quad{T}
     Mtot::Int
     const d::Union{InducedDistribution,MultivariateInducedDistribution}
     V::Matrix{T}
-    Vsq::Matrix{T}
+    Vsq::AbstractMatrix{T}
     const wsq::Vector{T}
     const τ²::Vector{T}
     const Gm::Matrix{T}
@@ -14,7 +14,7 @@ mutable struct LS_Quad{T}
 end
 
 # Assuming G=I
-function least_squares_quad(d::InducedDistribution, M=100; induced=true)
+function least_squares_quad(d::InducedDistribution, M=Int(1+(d.N+1)*(d.N+2)/2); induced=true)
     if induced
         nodes = rand(d, M)
     else
@@ -45,14 +45,17 @@ function least_squares_quad(d::InducedDistribution, M=100; induced=true)
     try
         w .= (Diagonal(1 ./ τ²) * (V * (Gm \ η))) ./ M
         Gminv = inv(Gm)
-    catch SingularException
+    catch e
+        if !isa(e, SingularException)
+            throw(e)
+        end
         w .= (Diagonal(1 ./ τ²) * (V * (pinv(Gm) \ η))) ./ M
         Gminv = nothing
     end
     return LS_Quad(M, d, V, Vsq, wsq, τ², Gm, Gminv, η, nodes, w, induced)
 end
 
-function least_squares_quad(d::MultivariateInducedDistribution, M=100; induced=true)
+function least_squares_quad(d::MultivariateInducedDistribution, M=Int(1+(length(d.index_set))*(length(d.index_set)+1)/2); induced=true)
     D = length(d.polys)
     N = length(d.index_set)
     if induced
@@ -97,7 +100,10 @@ function least_squares_quad(d::MultivariateInducedDistribution, M=100; induced=t
     Gminv = nothing
     try
         Gminv = inv(Gm)
-    catch SingularException
+    catch e
+        if !isa(e, SingularException)
+            throw(e)
+        end
     end
     return LS_Quad(M, d, V, Vsq, wsq, τ², Gm, Gminv, η, nodes, w, induced)
 end
@@ -163,13 +169,19 @@ function add_node!(q::LS_Quad, x=nothing; nodeidx=nothing, gminvtol=1e-2)
         # Update τ²
         q.τ²[nodeidx] = τ²new
         # Insert new row to Vsq
+        if !isa(q.Vsq, GivensUpDowndateMatrix)
+            q.Vsq = GivensUpDowndateMatrix(q.Vsq)
+        end
         idx = 1
+        newrow = Vector{Float64}(undef, size(q.Vsq, 2))
         for i in 1:N
             for j in i:N
-                q.Vsq[nodeidx,idx] = v[i] * v[j] / τ²new
+                #q.Vsq[nodeidx,idx] = v[i] * v[j] / τ²new
+                newrow[idx] = v[i] * v[j] / τ²new
                 idx += 1
             end
         end
+        givens_qr_row_update!(q.Vsq, nodeidx, newrow)
         # Update wsq
         q.wsq .*= M / (M+1)
         q.wsq[nodeidx] = 1 / (M+1)
@@ -185,7 +197,10 @@ function add_node!(q::LS_Quad, x=nothing; nodeidx=nothing, gminvtol=1e-2)
     else
         try
             q.Gminv = inv(q.Gm)
-        catch SingularException
+        catch e
+            if !isa(e, SingularException)
+                throw(e)
+            end
             q.Gminv = nothing
         end
     end
@@ -195,7 +210,10 @@ function add_node!(q::LS_Quad, x=nothing; nodeidx=nothing, gminvtol=1e-2)
     if !isnothing(q.Gminv) && norm(q.Gm * q.Gminv - I) > gminvtol
         try
             q.Gminv .= inv(q.Gm)
-        catch SingularException
+        catch e
+            if !isa(e, SingularException)
+                throw(e)
+            end
             q.Gminv = nothing
         end
     end
@@ -203,23 +221,38 @@ function add_node!(q::LS_Quad, x=nothing; nodeidx=nothing, gminvtol=1e-2)
     return
 end
 
-function remove_add_node!(q::LS_Quad, x=nothing; gminvtol=1e-2)
+function remove_add_node!(q::LS_Quad, x=nothing; gminvtol=1e-2, fullqr=false, qrresetpct=1e-3)
     M = q.Mtot
     N = size(q.V, 2)
-    # Select node to remove from q
-    Q, _ = qr(q.Vsq)
-    n = Q[:,end]
-    remval, remidx = findmin(abs.(q.wsq ./ n))
-    α = q.wsq[remidx] / n[remidx]
-    q.wsq .-= α .* n
-    # Remove node remidx from q
-    new_indices = [1:remidx-1 ; remidx+1:size(q.V,1)]
-    # Update weights, and V or τ²
-    #q.V .= Diagonal(q.wsq ./ (q.wsq .+ α .* n)) * q.V
-    q.τ² ./= (q.wsq ./ (q.wsq .+ α .* n))
-    q.weights[new_indices] .= (Diagonal(1 ./ q.τ²[new_indices]) * (view(q.V,new_indices,:) * (q.Gminv * q.η))) ./ M
-    # Add new node at remidx
-    add_node!(q, x, nodeidx=remidx, gminvtol=gminvtol)
+    if size(q.Vsq, 1) > size(q.Vsq, 2) && !isnothing(q.Gminv)
+        # Remove and add
+        # Select node to remove from q
+        if !isa(q.Vsq, GivensUpDowndateMatrix)
+            q.Vsq = GivensUpDowndateMatrix(q.Vsq)
+        elseif fullqr # Recompute QR
+            q.Vsq = GivensUpDowndateMatrix(q.Vsq.V)
+        end
+        if rand() < qrresetpct
+            reset!(q.Vsq)
+        end
+        n = q.Vsq.Q[:,end]
+        remval, remidx = findmin(abs.(q.wsq ./ n))
+        α = q.wsq[remidx] / n[remidx]
+        q.wsq .-= α .* n
+        # Downdate q.Vsq
+        givens_qr_row_downdate!(q.Vsq, remidx)
+        # Remove node remidx from q
+        new_indices = [1:remidx-1 ; remidx+1:size(q.V,1)]
+        # Update weights, and V or τ²
+        #q.V .= Diagonal(q.wsq ./ (q.wsq .+ α .* n)) * q.V
+        q.τ² ./= (q.wsq ./ (q.wsq .+ α .* n))
+        q.weights[new_indices] .= (Diagonal(1 ./ q.τ²[new_indices]) * (view(q.V,new_indices,:) * (q.Gminv * q.η))) ./ M
+        # Add new node at remidx
+        add_node!(q, x, nodeidx=remidx, gminvtol=gminvtol)
+    else
+        # Simply add a node
+        add_node!(q, x, gminvtol=gminvtol)
+    end
 end
 
 function combine_weights(q::LS_Quad{T}) where T
@@ -301,16 +334,16 @@ function trial_comparison(d::Union{InducedDistribution,MultivariateInducedDistri
     return succ, plt
 end
 
-function continuous_insertion_trials(d::Union{InducedDistribution,MultivariateInducedDistribution}, trials=100; M0=100, MMax=50M0, tol=1e-6, induced=true)
+function continuous_insertion_trials(d::Union{InducedDistribution,MultivariateInducedDistribution}, trials=100; MMax=5000, tol=1e-6, induced=true)
     allminweights = []
     allconcentrations = []
     allMs = []
     for trial in ProgressBar(1:trials)
-        q = least_squares_quad(d, M0, induced=induced)
+        q = least_squares_quad(d, induced=induced)
         minweights = Float64[]
         concentrations = Float64[]
         Ms = Int[]
-        for _ in M0:MMax
+        while q.Mtot < MMax
             add_node!(q)
             push!(minweights, minimum(q.weights))
             push!(concentrations, concentration(q))
@@ -332,16 +365,16 @@ function continuous_insertion_trials(d::Union{InducedDistribution,MultivariateIn
     return plt1, plt2, allminweights, allconcentrations, allMs
 end
 
-function continuous_removal_trials(d::Union{InducedDistribution,MultivariateInducedDistribution}, trials=100; M0=100, MMax=50M0, tol=1e-6, induced=true)
+function continuous_removal_trials(d::Union{InducedDistribution,MultivariateInducedDistribution}, trials=100; MMax=5000, tol=1e-6, induced=true)
     allminweights = []
     allconcentrations = []
     allMs = []
     for trial in ProgressBar(1:trials)
-        q = least_squares_quad(d, M0, induced=induced)
+        q = least_squares_quad(d, induced=induced)
         minweights = Float64[]
         concentrations = Float64[]
         Ms = Int[]
-        for _ in M0:MMax
+        while q.Mtot < MMax
             remove_add_node!(q)
             push!(minweights, minimum(q.weights))
             push!(concentrations, concentration(q))

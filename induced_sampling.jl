@@ -31,4 +31,5 @@ _dists = Dict(
 include("index_sets.jl")
 include("univariate.jl")
 include("multivariate.jl")
+include("givens_updowndate.jl")
 include("ls_quad.jl")
