@@ -1,3 +1,4 @@
+using CaratheodoryPruning
 using ClassicalOrthogonalPolynomials
 using Distributions
 using FastGaussQuadrature

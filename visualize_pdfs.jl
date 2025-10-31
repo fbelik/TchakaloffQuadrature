@@ -5,7 +5,7 @@ nsamp = 1000
 nsamp2d = 100
 
 #### Test 1D
-d = InducedDistribution(:jacobi4, 6, Q=500);
+d = InducedDistribution(:hermite, 6, Q=500);
 d0 = _dists[d.poly]
 # Compare PDFs
 plot(
@@ -35,7 +35,7 @@ xs = Dict(
     :jacobi4 => range(0,1,50),
     :jacobi09 => range(0,1,50),
 )
-polys = (:jacobi4,:jacobi4)
+polys = (:jacobi4,:laguerre)
 d = MultivariateInducedDistribution(polys, 5, Q=100);
 # Compare PDFs
 vissamples = true

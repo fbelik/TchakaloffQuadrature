@@ -60,22 +60,6 @@ function MultivariateInducedDistribution(polys=(:legendre,:legendre), N=5; index
     x_Qs = [PolyObjs[j].quad.nodes for j in 1:D]
     w_Qs = [PolyObjs[j].quad.weights for j in 1:D]
 
-    x_Q = Vector{Float64}[]
-    w_Q = Float64[]
-    Q_index_set = multi_index_set(D, Q-1, :tp)
-    # for idx in Q_index_set
-    #     x = [x_Qs[j][idx[j]+1] for j in 1:D]
-    #     w = prod(w_Qs[j][idx[j]+1] for j in 1:D)
-    #     push!(x_Q, x)
-    #     push!(w_Q, w)
-    # end
-
-    # X_Q = reduce(hcat, x_Q)
-
-    # Rename vars
-    #N = length(index_set)
-    # Q = length(x_Q)
-
     # Evaluate polynomials and normalize
     Pns = [
         collect(transpose(evaluate(0:N, PolyObjs[d].quad.nodes, PolyObjs[d])))

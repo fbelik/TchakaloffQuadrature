@@ -1,10 +1,13 @@
 mutable struct LS_Quad{T}
     Mtot::Int
+    Mcur::Int
     const d::Union{InducedDistribution,MultivariateInducedDistribution}
     V::Matrix{T}
+    const square_pairs::Vector{Tuple{Int,Int}}
     Vsq::AbstractMatrix{T}
     const wsq::Vector{T}
     const τ²::Vector{T}
+    const CS_rescale::Vector{T}
     const Gm::Matrix{T}
     Gminv::Union{Matrix{T},Nothing}
     const η::Vector{T}
@@ -14,7 +17,18 @@ mutable struct LS_Quad{T}
 end
 
 # Assuming G=I
-function least_squares_quad(d::InducedDistribution, M=Int(1+(d.N+1)*(d.N+2)/2); induced=true)
+function least_squares_quad(d::InducedDistribution, M=nothing; induced=true, poly_square_set=true)
+    N = d.N+1
+    square_pairs = begin
+        if poly_square_set
+            index_set_square_pairs([(i,) for i in 0:d.N])
+        else
+            [(i,j) for i in 1:N for j in i:N]
+        end
+    end
+    if isnothing(M)
+        M = length(square_pairs) + 1
+    end
     if induced
         nodes = rand(d, M)
     else
@@ -22,19 +36,15 @@ function least_squares_quad(d::InducedDistribution, M=Int(1+(d.N+1)*(d.N+2)/2); 
         nodes = rand(d0, M)
     end
     V = evaluate(0:d.N, nodes, d.PolyObj) ./ sqrt.(d.normssq)'
-    N = size(V, 2)
     τ² = sum(V .^ 2, dims=2)[:,1] ./ N
     if !induced
         τ² .= 1.0
     end
-    Vsq = Matrix{Float64}(undef, M, Int(N*(N+1)/2))
-    idx = 1
-    for i in 1:N
-        for j in i:N
-            for m in 1:M
-                Vsq[m,idx] = V[m,i] * V[m,j] / τ²[m]
-            end
-            idx += 1
+    CS_rescale = ones(M)
+    Vsq = Matrix{Float64}(undef, M, length(square_pairs))
+    for (idx,(i,j)) in enumerate(square_pairs)
+        for m in 1:M
+            Vsq[m,idx] = V[m,i] * V[m,j] / τ²[m]
         end
     end
     wsq = ones(M) ./ M
@@ -43,21 +53,30 @@ function least_squares_quad(d::InducedDistribution, M=Int(1+(d.N+1)*(d.N+2)/2); 
     w = zeros(M)
     Gminv = nothing
     try
-        w .= (Diagonal(1 ./ τ²) * (V * (Gm \ η))) ./ M
+        w .= transpose((transpose(η) / Gm) * V' * Diagonal(CS_rescale ./ τ²)) ./ M
         Gminv = inv(Gm)
     catch e
         if !isa(e, SingularException)
             throw(e)
         end
-        w .= (Diagonal(1 ./ τ²) * (V * (pinv(Gm) \ η))) ./ M
-        Gminv = nothing
+        w .= transpose((transpose(η) / pinv(Gm)) * V' * Diagonal(CS_rescale ./ τ²)) ./ M
     end
-    return LS_Quad(M, d, V, Vsq, wsq, τ², Gm, Gminv, η, nodes, w, induced)
+    return LS_Quad(M, M, d, V, square_pairs, Vsq, wsq, τ², CS_rescale, Gm, Gminv, η, nodes, w, induced)
 end
 
-function least_squares_quad(d::MultivariateInducedDistribution, M=Int(1+(length(d.index_set))*(length(d.index_set)+1)/2); induced=true)
-    D = length(d.polys)
+function least_squares_quad(d::MultivariateInducedDistribution, M=nothing; induced=true, poly_square_set=true)
     N = length(d.index_set)
+    square_pairs = begin
+        if poly_square_set
+            index_set_square_pairs(d.index_set)
+        else
+            [(i,j) for i in 1:N for j in i:N]
+        end
+    end
+    if isnothing(M)
+        M = length(square_pairs) + 1
+    end
+    D = length(d.polys)
     if induced
         nodes = rand(d, M)
     else
@@ -81,22 +100,19 @@ function least_squares_quad(d::MultivariateInducedDistribution, M=Int(1+(length(
     if !induced
         τ² .= 1.0
     end  
-    Vsq = Matrix{Float64}(undef, M, Int(N*(N+1)/2))
-    idx = 1
-    for i in 1:N
-        for j in i:N
-            for m in 1:M
-                Vsq[m,idx] = V[m,i] * V[m,j] / τ²[m]
-            end
-            idx += 1
+    CS_rescale = ones(M)
+    Vsq = Matrix{Float64}(undef, M, length(square_pairs))
+    for (idx,(i,j)) in enumerate(square_pairs)
+        for m in 1:M
+            Vsq[m,idx] = V[m,i] * V[m,j] / τ²[m]
         end
     end
     wsq = ones(M) ./ M
-    η = zeros(N); η[1] = 1;#d.V * d.w_Q
+    η = zeros(N); η[1] = 1
     nodes = [collect(x) for x in eachcol(nodes)]
     Gm = (V' * Diagonal(1 ./ τ²) * V) ./ (M)
     G = I
-    w = (Diagonal(1 ./ τ²) * (V * (Gm \ η)))./ M
+    w = transpose((transpose(η) / Gm) * V' * Diagonal(CS_rescale ./ τ²)) ./ M
     Gminv = nothing
     try
         Gminv = inv(Gm)
@@ -105,11 +121,10 @@ function least_squares_quad(d::MultivariateInducedDistribution, M=Int(1+(length(
             throw(e)
         end
     end
-    return LS_Quad(M, d, V, Vsq, wsq, τ², Gm, Gminv, η, nodes, w, induced)
+    return LS_Quad(M, M, d, V, square_pairs, Vsq, wsq, τ², CS_rescale, Gm, Gminv, η, nodes, w, induced)
 end
 
 function add_node!(q::LS_Quad, x=nothing; nodeidx=nothing, gminvtol=1e-2)
-    M = q.Mtot
     N = size(q.V, 2)
     # Sample new node
     if isnothing(x)
@@ -141,59 +156,59 @@ function add_node!(q::LS_Quad, x=nothing; nodeidx=nothing, gminvtol=1e-2)
     if !q.induced
         τ²new = 1.0
     end
+    if q.Mcur < q.Mtot
+        # Rescale CS_rescale
+        q.CS_rescale .*= (q.Mcur + 1) / q.Mcur
+        q.CS_rescale .*= q.Mtot / (q.Mtot + 1)
+    end
     if isnothing(nodeidx)
         # Add new row to V
         q.V = vcat(q.V, v')
         # Update τ²
         push!(q.τ², τ²new)
+        # Update CS_rescale
+        push!(q.CS_rescale, (q.Mcur+1)/(q.Mtot+1))
         # Add new row to Vsq
-        q.Vsq = vcat(q.Vsq, Vector{Float64}(undef, Int(N*(N+1)/2))')
-        idx = 1
-        for i in 1:N
-            for j in i:N
-                q.Vsq[end,idx] = v[i] * v[j] / τ²new
-                idx += 1
-            end
+        q.Vsq = vcat(q.Vsq, Vector{Float64}(undef, length(q.square_pairs))')
+        for (idx,(i,j)) in enumerate(q.square_pairs)
+            q.Vsq[end,idx] = v[i] * v[j] / τ²new
+            idx += 1
         end
         # Add new element to wsq
-        q.wsq .*= M / (M+1)
-        push!(q.wsq, 1 / (M+1))
+        q.wsq .*= q.Mtot / (q.Mtot+1)
+        push!(q.wsq, 1 / (q.Mtot+1))
         # Add node
         push!(q.nodes, x)
-        # Update weights
+        # Insert new weight
         push!(q.weights, 0)
-        q.weights .= (Diagonal(1 ./ q.τ²) * (q.V * (q.Gminv * q.η))) ./ (M+1)
     else
         # Insert new row to V
         q.V[nodeidx,:] .= v
         # Update τ²
         q.τ²[nodeidx] = τ²new
+        # Update CS_rescale
+        q.CS_rescale[nodeidx] = (q.Mcur+1)/(q.Mtot+1)
         # Insert new row to Vsq
         if !isa(q.Vsq, GivensUpDowndateMatrix)
             q.Vsq = GivensUpDowndateMatrix(q.Vsq)
         end
-        idx = 1
         newrow = Vector{Float64}(undef, size(q.Vsq, 2))
-        for i in 1:N
-            for j in i:N
-                #q.Vsq[nodeidx,idx] = v[i] * v[j] / τ²new
-                newrow[idx] = v[i] * v[j] / τ²new
-                idx += 1
-            end
+        for (idx,(i,j)) in enumerate(q.square_pairs)
+            newrow[idx] = v[i] * v[j] / τ²new
         end
         givens_qr_row_update!(q.Vsq, nodeidx, newrow)
         # Update wsq
-        q.wsq .*= M / (M+1)
-        q.wsq[nodeidx] = 1 / (M+1)
+        q.wsq .*= q.Mtot / (q.Mtot+1)
+        q.wsq[nodeidx] = 1 / (q.Mtot+1)
         # Insert node
         q.nodes[nodeidx] = x
     end
     # Update Gm
-    q.Gm .= M / (M+1) .* q.Gm .+ (v * v') ./ (τ²new * (M+1))
+    q.Gm .= q.Mtot / (q.Mtot+1) .* q.Gm .+ (v * v') ./ (τ²new * (q.Mtot+1))
     # Update Gm⁻¹ by Sherman-Morrison
     if !isnothing(q.Gminv)
         prod = q.Gminv * v
-        q.Gminv .= (M+1)/M .* (q.Gminv .- (prod * prod') ./ (M*τ²new + dot(v,q.Gminv,v)))
+        q.Gminv .= (q.Mtot+1)/q.Mtot .* (q.Gminv .- (prod * prod') ./ (q.Mtot*τ²new + dot(v,q.Gminv,v)))
     else
         try
             q.Gminv = inv(q.Gm)
@@ -204,8 +219,11 @@ function add_node!(q::LS_Quad, x=nothing; nodeidx=nothing, gminvtol=1e-2)
             q.Gminv = nothing
         end
     end
+    # Update M
+    q.Mcur += 1
+    q.Mtot += 1
     # Update weights
-    q.weights .= (Diagonal(1 ./ q.τ²) * (q.V * (q.Gminv * q.η))) ./ (M+1)
+    q.weights .= transpose((transpose(q.η) * q.Gminv) * q.V' * Diagonal(q.CS_rescale ./ q.τ²)) ./ q.Mcur
     # Check Gminv
     if !isnothing(q.Gminv) && norm(q.Gm * q.Gminv - I) > gminvtol
         try
@@ -217,13 +235,47 @@ function add_node!(q::LS_Quad, x=nothing; nodeidx=nothing, gminvtol=1e-2)
             q.Gminv = nothing
         end
     end
-    q.Mtot += 1
     return
 end
 
+function remove_node!(q::LS_Quad; gminvtol=1e-2, fullqr=false, qrresetpct=1e-3)
+    if size(q.Vsq, 1) > size(q.Vsq, 2) && !isnothing(q.Gminv)
+        # Remove node and resize
+        # Select node to remove from q
+        if !isa(q.Vsq, GivensUpDowndateMatrix)
+            q.Vsq = GivensUpDowndateMatrix(q.Vsq)
+        elseif fullqr # Recompute QR
+            q.Vsq = GivensUpDowndateMatrix(q.Vsq.V)
+        end
+        if rand() < qrresetpct
+            reset!(q.Vsq)
+        end
+        n = q.Vsq.Q[:,end]
+        _, remidx = findmin(abs.(q.wsq ./ n))
+        α = q.wsq[remidx] / n[remidx]
+        q.wsq .-= α .* n
+        # Downdate q.Vsq
+        givens_qr_row_downdate!(q.Vsq, remidx)
+        # Remove node remidx from q
+        new_indices = [1:remidx-1 ; remidx+1:size(q.V,1)]
+        # Update weights, and CS_rescale
+        q.CS_rescale .*= (q.wsq ./ (q.wsq .+ α .* n))
+        q.Mcur -= 1
+        q.CS_rescale .*= q.Mcur / (q.Mcur + 1)
+        q.weights[new_indices] .= transpose((transpose(q.η) * q.Gminv) * view(q.V,new_indices,:)' * Diagonal(view(q.CS_rescale, new_indices) ./ view(q.τ²,new_indices))) ./ q.Mcur
+        # Resize arrays
+        q.V = q.V[new_indices,:]
+        q.Vsq = q.Vsq[new_indices,:]
+        deleteat!(q.wsq, remidx)
+        deleteat!(q.τ², remidx)
+        deleteat!(q.CS_rescale, remidx)
+        deleteat!(q.nodes, remidx)
+        deleteat!(q.weights, remidx)
+        return
+    end
+end
+
 function remove_add_node!(q::LS_Quad, x=nothing; gminvtol=1e-2, fullqr=false, qrresetpct=1e-3)
-    M = q.Mtot
-    N = size(q.V, 2)
     if size(q.Vsq, 1) > size(q.Vsq, 2) && !isnothing(q.Gminv)
         # Remove and add
         # Select node to remove from q
@@ -236,22 +288,51 @@ function remove_add_node!(q::LS_Quad, x=nothing; gminvtol=1e-2, fullqr=false, qr
             reset!(q.Vsq)
         end
         n = q.Vsq.Q[:,end]
-        remval, remidx = findmin(abs.(q.wsq ./ n))
+        _, remidx = findmin(abs.(q.wsq ./ n))
         α = q.wsq[remidx] / n[remidx]
         q.wsq .-= α .* n
         # Downdate q.Vsq
         givens_qr_row_downdate!(q.Vsq, remidx)
         # Remove node remidx from q
         new_indices = [1:remidx-1 ; remidx+1:size(q.V,1)]
-        # Update weights, and V or τ²
-        #q.V .= Diagonal(q.wsq ./ (q.wsq .+ α .* n)) * q.V
-        q.τ² ./= (q.wsq ./ (q.wsq .+ α .* n))
-        q.weights[new_indices] .= (Diagonal(1 ./ q.τ²[new_indices]) * (view(q.V,new_indices,:) * (q.Gminv * q.η))) ./ M
+        # Update weights, and CS_rescale
+        q.CS_rescale .*= (q.wsq ./ (q.wsq .+ α .* n))
+        q.Mcur -= 1
+        q.CS_rescale .*= q.Mcur / (q.Mcur + 1)
+        q.weights[new_indices] .= transpose((transpose(q.η) * q.Gminv) * view(q.V,new_indices,:)' * Diagonal(view(q.CS_rescale, new_indices) ./ view(q.τ²,new_indices))) ./ q.Mcur
         # Add new node at remidx
         add_node!(q, x, nodeidx=remidx, gminvtol=gminvtol)
     else
         # Simply add a node
         add_node!(q, x, gminvtol=gminvtol)
+    end
+end
+
+function moment_error(q::LS_Quad, norm=norm)
+    return norm(transpose(q.V) * q.weights .- q.η)
+end
+
+function ls_nodes_weights_pruned(q::LS_Quad; kwargs...)
+    V = q.V
+    w = q.weights
+    w_pruned,inds = caratheodory_pruning(V, w; kwargs...) 
+    return q.nodes[inds], w_pruned[inds], inds
+end
+
+function ls_weights(q::LS_Quad, CS_rescaled=true)
+    if CS_rescaled
+        return q.weights
+    else
+        Gm = (q.V' * Diagonal(1 ./ q.τ²) * q.V) ./ M
+        return transpose((transpose(q.η) / Gm) * q.V' * Diagonal(1 ./ q.τ²)) ./ q.Mcur
+    end
+end
+
+function monte_carlo_weights(q::LS_Quad, CS_rescaled=true)
+    if CS_rescaled
+        return q.wsq ./ q.τ²
+    else
+        return 1 / q.Mcur ./ q.τ²
     end
 end
 
@@ -303,9 +384,9 @@ function Plots.plot!(q::LS_Quad; kwargs...)
     end
 end
 
-function is_positive(q::LS_Quad; tol=0.0)
+function is_positive(q::LS_Quad, CS_rescaled=true; tol=0.0)
     mval = -1 * abs(tol)
-    for w in q.weights
+    for w in ls_weights(q, CS_rescaled)
         if w < mval
             return false
         end
