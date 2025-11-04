@@ -1,4 +1,4 @@
-include("induced_sampling.jl")
+include("tchakaloff_quad.jl")
 
 # Quadrature rule for integation
 N = 10; M=200;trials=1000;
