@@ -1,4 +1,4 @@
-include("induced_sampling.jl")
+include("tchakaloff_quad.jl")
 
 maxxlim = 20
 nsamp = 1000

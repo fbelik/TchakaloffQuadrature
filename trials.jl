@@ -63,7 +63,7 @@ plot(
     plot_title="Continuous Removal"
 )
 
-d = InducedDistribution(:laguerre, 15);
+d = InducedDistribution(:hermite, 10);
 
 animnum = 10000
 eachframe = floor(Int, animnum / 250)
